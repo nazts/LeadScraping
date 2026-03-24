@@ -1,0 +1,41 @@
+# Archivo de variables de entorno REAL (nunca commitear)
+.env
+
+# Resultados del scraper (datos de clientes)
+*.csv
+*.json
+!package.json
+!package-lock.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+*.whl
+
+# Entornos virtuales
+venv/
+env/
+.venv/
+.env/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
