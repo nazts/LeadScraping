@@ -1,0 +1,6 @@
+# Core dependencies
+googlemaps>=4.10.0        # Official Google Maps Services Python client
+python-dotenv>=1.0.0      # Loads API keys from .env file
+
+# Optional — only needed when using the --use-ai flag
+openai>=1.0.0             # OpenAI API client (gpt-3.5-turbo for query generation & validation)
