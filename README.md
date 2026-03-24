@@ -11,6 +11,8 @@ API comerciales.
 - Dependencias: `pip install -r requirements.txt`.
 - No se necesitan claves API para Nominatim/Overpass; sí es obligatorio
   definir un User-Agent propio (se usa uno por defecto).
+- Los teléfonos encontrados se normalizan automáticamente a formato E.164,
+  listo para WhatsApp.
 - (Opcional) `OPENAI_API_KEY` para mejorar búsquedas y validación de datos.
 
 ### Variables de entorno relevantes
