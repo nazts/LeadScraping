@@ -3,11 +3,11 @@
 lead_scraper.py
 ===============
 Script para buscar clientes potenciales (leads) de un nicho específico
-que NO tengan sitio web, usando la API oficial de Google Places.
+que NO tengan sitio web, usando OpenStreetMap (Nominatim + Overpass API).
 
 Datos recopilados por cada negocio:
   - Nombre del negocio
-  - Enlace de Google Maps
+  - Enlace de OpenStreetMap
   - Número de teléfono (formato internacional / WhatsApp)
 
 Uso básico:
@@ -22,7 +22,6 @@ Ver todas las opciones:
 
 import os
 import sys
-import time
 import json
 import csv
 import argparse
@@ -35,7 +34,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-import googlemaps
+import requests
 import phonenumbers
 from tqdm import tqdm
 
@@ -66,22 +65,23 @@ logger = logging.getLogger(__name__)
 # Constantes
 # ─────────────────────────────────────────────────────────────────
 
-# Campos de Place Details que queremos obtener.
-# Cada campo adicional incrementa el costo de la API; solo pedimos
-# lo estrictamente necesario para reducir gastos.
-PLACE_DETAIL_FIELDS = [
-    "name",           # Nombre del negocio
-    "formatted_phone_number",   # Teléfono con formato local
-    "international_phone_number",  # Teléfono en formato internacional (+xx)
-    "website",        # Sitio web (lo usamos para EXCLUIR negocios que sí tienen)
-    "url",            # URL de Google Maps del lugar
-    "place_id",       # ID único del lugar en Google
-    "business_status", # Estado: OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY
-]
+# Endpoints OSM (pueden sobreescribirse con variables de entorno)
+NOMINATIM_URL = os.getenv("NOMINATIM_URL", "https://nominatim.openstreetmap.org/search")
+OVERPASS_URL = os.getenv("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
+# Radio de búsqueda en metros (50 km por defecto)
+SEARCH_RADIUS_METERS = int(os.getenv("OSM_SEARCH_RADIUS", "50000"))
 
-# Tiempo de espera entre peticiones a la API (segundos).
-# Google recomienda no superar 10 QPS en Places API.
-REQUEST_DELAY = 0.5
+# User-Agent enviado a Nominatim y Overpass (política de uso requiere identificación)
+OSM_USER_AGENT = os.getenv(
+    "OSM_USER_AGENT",
+    "LeadScraping/1.0 (https://github.com/nazts/LeadScraping)",
+)
+
+# Al buscar en Overpass pedimos hasta OVERPASS_FETCH_MULTIPLIER veces el
+# límite solicitado para compensar los elementos que se descartan por falta
+# de teléfono u otros criterios. El resultado total nunca supera OVERPASS_MAX_FETCH.
+OVERPASS_FETCH_MULTIPLIER = 3
+OVERPASS_MAX_FETCH = 300
 
 # Número máximo de reintentos si la API devuelve un error transitorio
 MAX_RETRIES = 3
@@ -94,12 +94,10 @@ MAX_RETRIES = 3
 class LeadScraper:
     """
     Busca negocios de un nicho específico que NO tengan sitio web
-    usando la Google Places API.
+    usando OpenStreetMap (Nominatim para geocodificación y Overpass para POIs).
 
     Parámetros
     ----------
-    api_key : str
-        Clave de la Google Maps Platform API.
     use_ai : bool
         Si True, usa OpenAI para mejorar las consultas y validar datos.
     openai_api_key : str | None
@@ -110,14 +108,10 @@ class LeadScraper:
 
     def __init__(
         self,
-        api_key: str,
         use_ai: bool = False,
         openai_api_key: Optional[str] = None,
         openai_model: str = "gpt-4o-mini",
     ):
-        # Inicializa el cliente oficial de Google Maps
-        self.gmaps = googlemaps.Client(key=api_key)
-
         # Configura el modo IA
         self.use_ai = use_ai
         self.ai_client: Optional[object] = None
@@ -246,62 +240,39 @@ class LeadScraper:
 
     # ── Búsqueda y extracción de datos ────────────────────────────
 
-    def _text_search_page(
-        self, query: str, page_token: Optional[str] = None
-    ) -> dict:
+    def _geocode_location(self, location: str) -> tuple[float, float]:
+        """Usa Nominatim para geocodificar la ubicación en coordenadas lat/lon."""
+        headers = {"User-Agent": OSM_USER_AGENT}
+        params = {"q": location, "format": "json", "limit": 1}
+        resp = requests.get(NOMINATIM_URL, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data:
+            raise ValueError(f"No se pudo geocodificar la ubicación: {location}")
+        return float(data[0]["lat"]), float(data[0]["lon"])
+
+    def _overpass_search(self, name_query: str, lat: float, lon: float, limit: int) -> list[dict]:
         """
-        Llama a gmaps.places() (Text Search) con reintentos automáticos.
-
-        La respuesta incluye hasta 20 resultados y puede tener un
-        'next_page_token' para obtener más páginas.
-
-        Retorna
-        -------
-        dict
-            Respuesta de la API (campos: status, results, next_page_token)
+        Busca POIs sin campo 'website' en un radio alrededor de lat/lon cuyo
+        nombre coincida con name_query (regex, insensible a mayúsculas).
         """
-        for attempt in range(MAX_RETRIES):
-            try:
-                if page_token:
-                    # Google requiere 2 segundos de espera antes de usar un page_token
-                    time.sleep(2)
-                    return self.gmaps.places(query=query, page_token=page_token)
-                return self.gmaps.places(query=query)
-            except googlemaps.exceptions.ApiError as exc:
-                logger.warning(f"Error API (intento {attempt + 1}/{MAX_RETRIES}): {exc}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(2 ** attempt)  # Backoff exponencial
-                else:
-                    raise
-
-    def _get_place_details(self, place_id: str) -> Optional[dict]:
-        """
-        Obtiene los detalles completos de un lugar por su place_id.
-
-        Solo solicita los campos definidos en PLACE_DETAIL_FIELDS para
-        minimizar el costo de la API.
-
-        Retorna
-        -------
-        dict | None
-            Datos del lugar, o None si ocurrió un error.
-        """
-        for attempt in range(MAX_RETRIES):
-            try:
-                result = self.gmaps.place(
-                    place_id=place_id,
-                    fields=PLACE_DETAIL_FIELDS,
-                )
-                return result.get("result", {})
-            except googlemaps.exceptions.ApiError as exc:
-                logger.warning(
-                    f"Error al obtener detalles de {place_id} "
-                    f"(intento {attempt + 1}/{MAX_RETRIES}): {exc}"
-                )
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    return None
+        fetch = min(limit * OVERPASS_FETCH_MULTIPLIER, OVERPASS_MAX_FETCH)
+        q = (
+            f"[out:json][timeout:25];\n"
+            f"(\n"
+            f'  node["name"~"{name_query}",i][!"website"]'
+            f"(around:{SEARCH_RADIUS_METERS},{lat},{lon});\n"
+            f'  way["name"~"{name_query}",i][!"website"]'
+            f"(around:{SEARCH_RADIUS_METERS},{lat},{lon});\n"
+            f'  relation["name"~"{name_query}",i][!"website"]'
+            f"(around:{SEARCH_RADIUS_METERS},{lat},{lon});\n"
+            f");\n"
+            f"out center {fetch};\n"
+        )
+        headers = {"User-Agent": OSM_USER_AGENT}
+        resp = requests.post(OVERPASS_URL, data={"data": q}, headers=headers, timeout=60)
+        resp.raise_for_status()
+        return resp.json().get("elements", [])
 
     def _format_phone_for_whatsapp(self, raw_phone: str) -> Optional[str]:
         """
@@ -322,52 +293,49 @@ class LeadScraper:
             pass
         return None
 
-    def _extract_lead(self, place_id: str) -> Optional[dict]:
+    def _extract_lead(self, element: dict) -> Optional[dict]:
         """
-        Extrae los datos de un lugar y los valida.
+        Extrae los datos de un elemento OSM y los valida.
 
         Regla de negocio:
-        - El negocio NO debe tener sitio web.
-        - Debe tener nombre, teléfono válido y URL de Google Maps.
-        - El estado del negocio debe ser OPERATIONAL.
+        - Debe tener nombre y número de teléfono válido.
+        - Ya filtrado por Overpass para excluir elementos con 'website'.
 
         Retorna
         -------
         dict | None
-            Lead válido, o None si el lugar no cumple los criterios.
+            Lead válido, o None si el elemento no cumple los criterios.
         """
-        details = self._get_place_details(place_id)
-        if not details:
+        tags = element.get("tags", {})
+        name = tags.get("name", "").strip()
+        if not name:
             return None
 
-        # ── Filtro 1: solo negocios operativos ──
-        status = details.get("business_status", "OPERATIONAL")
-        if status != "OPERATIONAL":
-            return None
-
-        # ── Filtro 2: excluir negocios que SÍ tienen sitio web ──
-        if details.get("website"):
-            return None
-
-        # ── Extracción de datos requeridos ──
-        name = details.get("name", "").strip()
-        maps_url = details.get("url", "")
-
-        # Prefiere el número internacional; si no, usa el formateado localmente
-        raw_phone = details.get("international_phone_number") or \
-                    details.get("formatted_phone_number") or ""
-
+        raw_phone = tags.get("phone") or tags.get("contact:phone") or ""
         phone = self._format_phone_for_whatsapp(raw_phone)
-
-        # ── Filtro 3: todos los campos obligatorios deben estar presentes ──
-        if not name or not maps_url or not phone:
+        if not phone:
             return None
+
+        osm_type = element.get("type")
+        osm_id = element.get("id")
+        # nodes have lat/lon directly; ways/relations use center
+        if element.get("center"):
+            center = element["center"]
+        elif "lat" in element and "lon" in element:
+            center = {"lat": element["lat"], "lon": element["lon"]}
+        else:
+            center = None
+
+        if not osm_type or osm_id is None or not center:
+            return None
+
+        maps_url = f"https://www.openstreetmap.org/{osm_type}/{osm_id}"
 
         return {
             "name": name,
-            "phone": phone,        # Formato E.164 para WhatsApp
+            "phone": phone,
             "maps_url": maps_url,
-            "place_id": place_id,
+            "osm_id": f"{osm_type}/{osm_id}",
         }
 
     def _ai_validate_lead(self, lead: dict, niche: str = "business") -> bool:
@@ -434,10 +402,11 @@ class LeadScraper:
         Retorna
         -------
         list[dict]
-            Lista de leads. Cada lead tiene: name, phone, maps_url, place_id.
+            Lista de leads. Cada lead tiene: name, phone, maps_url, osm_id.
         """
+        lat, lon = self._geocode_location(location)
         leads: list[dict] = []
-        seen_place_ids: set[str] = set()  # Evita duplicados
+        seen_ids: set[str] = set()  # Evita duplicados
 
         queries = self._build_search_queries(niche, location)
         logger.info(
@@ -454,50 +423,39 @@ class LeadScraper:
                 break
 
             logger.debug(f"Buscando: {query}")
-            page_token = None
+            try:
+                results = self._overpass_search(query, lat, lon, count - len(leads))
+            except Exception as exc:
+                logger.error(f"Error en búsqueda '{query}': {exc}")
+                continue
 
-            # Itera sobre las páginas de resultados de esta consulta
-            while len(leads) < count:
-                try:
-                    response = self._text_search_page(query, page_token)
-                except Exception as exc:
-                    logger.error(f"Error en búsqueda '{query}': {exc}")
+            for element in results:
+                if len(leads) >= count:
                     break
 
-                results = response.get("results", [])
-                if not results:
-                    break
+                osm_type = element.get("type")
+                osm_id = element.get("id")
+                if not osm_type or osm_id is None:
+                    continue
+                uid = f"{osm_type}/{osm_id}"
+                if uid in seen_ids:
+                    continue
+                seen_ids.add(uid)
 
-                for place in results:
-                    if len(leads) >= count:
-                        break
+                lead = self._extract_lead(element)
+                if lead is None:
+                    continue
 
-                    place_id = place.get("place_id")
-                    if not place_id or place_id in seen_place_ids:
-                        continue
-                    seen_place_ids.add(place_id)
+                # Validación adicional con IA (si está activa)
+                if self.use_ai and not self._ai_validate_lead(lead, niche=niche):
+                    logger.debug(f"IA descartó: {lead['name']}")
+                    continue
 
-                    time.sleep(REQUEST_DELAY)
-
-                    lead = self._extract_lead(place_id)
-                    if lead is None:
-                        continue
-
-                    # Validación adicional con IA (si está activa)
-                    if self.use_ai and not self._ai_validate_lead(lead, niche=niche):
-                        logger.debug(f"IA descartó: {lead['name']}")
-                        continue
-
-                    leads.append(lead)
-                    pbar.update(1)
-                    logger.debug(
-                        f"Lead #{len(leads)}: {lead['name']} | {lead['phone']}"
-                    )
-
-                # Pasa a la siguiente página si existe
-                page_token = response.get("next_page_token")
-                if not page_token:
-                    break
+                leads.append(lead)
+                pbar.update(1)
+                logger.debug(
+                    f"Lead #{len(leads)}: {lead['name']} | {lead['phone']}"
+                )
 
         pbar.close()
 
@@ -524,7 +482,8 @@ def save_leads(leads: list[dict], output_path: str) -> None:
     Los campos guardados son:
       - name     : Nombre del negocio
       - phone    : Número de teléfono en formato E.164 (WhatsApp)
-      - maps_url : Enlace directo a Google Maps
+      - maps_url : Enlace directo a OpenStreetMap
+      - osm_id   : Identificador OSM del lugar (tipo/id)
 
     Parámetros
     ----------
@@ -543,7 +502,7 @@ def save_leads(leads: list[dict], output_path: str) -> None:
 
     else:
         # Por defecto guarda como CSV (más fácil de abrir en Excel)
-        fieldnames = ["name", "phone", "maps_url", "place_id"]
+        fieldnames = ["name", "phone", "maps_url", "osm_id"]
         with open(path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
@@ -565,8 +524,8 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "LeadScraper: busca negocios sin sitio web usando Google Places API.\n"
-            "Guarda nombre, teléfono (WhatsApp) y ubicación (Google Maps)."
+            "LeadScraper: busca negocios sin sitio web usando OpenStreetMap + Overpass API.\n"
+            "Guarda nombre, teléfono (WhatsApp) y ubicación (OpenStreetMap)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
@@ -630,9 +589,9 @@ def main() -> None:
 
     Flujo de ejecución:
     1. Lee argumentos de CLI
-    2. Valida la clave de API de Google Maps
-    3. Inicializa el scraper (con o sin IA)
-    4. Ejecuta la búsqueda
+    2. Inicializa el scraper (con o sin IA)
+    3. Geocodifica la ubicación con Nominatim
+    4. Ejecuta la búsqueda de POIs vía Overpass
     5. Guarda los resultados
     """
     args = parse_args()
@@ -640,24 +599,12 @@ def main() -> None:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # ── Validar clave de Google Maps ──
-    google_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
-    if not google_api_key:
-        logger.error(
-            "No se encontró GOOGLE_MAPS_API_KEY.\n"
-            "1. Copia .env.example a .env\n"
-            "2. Rellena tu clave de Google Maps Platform\n"
-            "3. Vuelve a ejecutar el script"
-        )
-        sys.exit(1)
-
     if args.count <= 0:
         logger.error("--count debe ser un número entero positivo.")
         sys.exit(1)
 
     # ── Inicializar scraper ──
     scraper = LeadScraper(
-        api_key=google_api_key,
         use_ai=args.use_ai,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
