@@ -3,7 +3,7 @@
 lead_scraper.py
 ===============
 Script para buscar clientes potenciales (leads) de un nicho específico
-que NO tengan sitio web, usando la API oficial de Google Places.
+que NO tengan sitio web, usando la API de Apify (actor: compass/crawler-google-places).
 
 Datos recopilados por cada negocio:
   - Nombre del negocio
@@ -35,7 +35,7 @@ from typing import Optional
 from dotenv import load_dotenv
 load_dotenv()
 
-import googlemaps
+from apify_client import ApifyClient
 import phonenumbers
 from tqdm import tqdm
 
@@ -66,22 +66,13 @@ logger = logging.getLogger(__name__)
 # Constantes
 # ─────────────────────────────────────────────────────────────────
 
-# Campos de Place Details que queremos obtener.
-# Cada campo adicional incrementa el costo de la API; solo pedimos
-# lo estrictamente necesario para reducir gastos.
-PLACE_DETAIL_FIELDS = [
-    "name",           # Nombre del negocio
-    "formatted_phone_number",   # Teléfono con formato local
-    "international_phone_number",  # Teléfono en formato internacional (+xx)
-    "website",        # Sitio web (lo usamos para EXCLUIR negocios que sí tienen)
-    "url",            # URL de Google Maps del lugar
-    "place_id",       # ID único del lugar en Google
-    "business_status", # Estado: OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY
-]
+# Número máximo de lugares que Apify scrapeará por consulta de búsqueda.
+# Aumentar este valor devuelve más candidatos pero consume más créditos.
+MAX_PLACES_PER_QUERY = 20
 
-# Tiempo de espera entre peticiones a la API (segundos).
-# Google recomienda no superar 10 QPS en Places API.
-REQUEST_DELAY = 0.5
+# Número de consultas enviadas en cada llamada al actor de Apify.
+# Lotes más pequeños reducen el tiempo de espera por ejecución.
+APIFY_BATCH_SIZE = 10
 
 # Número máximo de reintentos si la API devuelve un error transitorio
 MAX_RETRIES = 3
@@ -94,12 +85,12 @@ MAX_RETRIES = 3
 class LeadScraper:
     """
     Busca negocios de un nicho específico que NO tengan sitio web
-    usando la Google Places API.
+    usando la API de Apify (actor: compass/crawler-google-places).
 
     Parámetros
     ----------
-    api_key : str
-        Clave de la Google Maps Platform API.
+    api_token : str
+        Token de autenticación de Apify.
     use_ai : bool
         Si True, usa OpenAI para mejorar las consultas y validar datos.
     openai_api_key : str | None
@@ -110,13 +101,13 @@ class LeadScraper:
 
     def __init__(
         self,
-        api_key: str,
+        api_token: str,
         use_ai: bool = False,
         openai_api_key: Optional[str] = None,
         openai_model: str = "gpt-4o-mini",
     ):
-        # Inicializa el cliente oficial de Google Maps
-        self.gmaps = googlemaps.Client(key=api_key)
+        # Inicializa el cliente oficial de Apify
+        self._apify = ApifyClient(api_token)
 
         # Configura el modo IA
         self.use_ai = use_ai
@@ -246,62 +237,44 @@ class LeadScraper:
 
     # ── Búsqueda y extracción de datos ────────────────────────────
 
-    def _text_search_page(
-        self, query: str, page_token: Optional[str] = None
-    ) -> dict:
+    def _search_places(self, queries: list[str]) -> list[dict]:
         """
-        Llama a gmaps.places() (Text Search) con reintentos automáticos.
+        Ejecuta el actor de Apify 'compass/crawler-google-places' con las
+        consultas indicadas y devuelve todos los ítems del dataset resultante.
 
-        La respuesta incluye hasta 20 resultados y puede tener un
-        'next_page_token' para obtener más páginas.
+        Parámetros
+        ----------
+        queries : list[str]
+            Lista de consultas de búsqueda (ej: ["dental clinic Spain"]).
 
         Retorna
         -------
-        dict
-            Respuesta de la API (campos: status, results, next_page_token)
+        list[dict]
+            Lista de negocios encontrados por Apify.
         """
         for attempt in range(MAX_RETRIES):
             try:
-                if page_token:
-                    # Google requiere 2 segundos de espera antes de usar un page_token
-                    time.sleep(2)
-                    return self.gmaps.places(query=query, page_token=page_token)
-                return self.gmaps.places(query=query)
-            except googlemaps.exceptions.ApiError as exc:
-                logger.warning(f"Error API (intento {attempt + 1}/{MAX_RETRIES}): {exc}")
-                if attempt < MAX_RETRIES - 1:
-                    time.sleep(2 ** attempt)  # Backoff exponencial
-                else:
-                    raise
-
-    def _get_place_details(self, place_id: str) -> Optional[dict]:
-        """
-        Obtiene los detalles completos de un lugar por su place_id.
-
-        Solo solicita los campos definidos en PLACE_DETAIL_FIELDS para
-        minimizar el costo de la API.
-
-        Retorna
-        -------
-        dict | None
-            Datos del lugar, o None si ocurrió un error.
-        """
-        for attempt in range(MAX_RETRIES):
-            try:
-                result = self.gmaps.place(
-                    place_id=place_id,
-                    fields=PLACE_DETAIL_FIELDS,
+                run = self._apify.actor("compass/crawler-google-places").call(
+                    run_input={
+                        "searchStringsArray": queries,
+                        "maxCrawledPlacesPerSearch": MAX_PLACES_PER_QUERY,
+                        "language": "en",
+                        "includeHistogram": False,
+                        "includeOpeningHours": False,
+                        "includePeopleAlsoBrowse": False,
+                    }
                 )
-                return result.get("result", {})
-            except googlemaps.exceptions.ApiError as exc:
+                return list(
+                    self._apify.dataset(run["defaultDatasetId"]).iterate_items()
+                )
+            except Exception as exc:
                 logger.warning(
-                    f"Error al obtener detalles de {place_id} "
-                    f"(intento {attempt + 1}/{MAX_RETRIES}): {exc}"
+                    f"Error en búsqueda Apify (intento {attempt + 1}/{MAX_RETRIES}): {exc}"
                 )
                 if attempt < MAX_RETRIES - 1:
                     time.sleep(2 ** attempt)
                 else:
-                    return None
+                    raise
 
     def _format_phone_for_whatsapp(self, raw_phone: str) -> Optional[str]:
         """
@@ -322,40 +295,33 @@ class LeadScraper:
             pass
         return None
 
-    def _extract_lead(self, place_id: str) -> Optional[dict]:
+    def _extract_lead(self, item: dict) -> Optional[dict]:
         """
-        Extrae los datos de un lugar y los valida.
+        Extrae los datos de un ítem devuelto por Apify y los valida.
 
         Regla de negocio:
         - El negocio NO debe tener sitio web.
         - Debe tener nombre, teléfono válido y URL de Google Maps.
-        - El estado del negocio debe ser OPERATIONAL.
+        - El negocio no debe estar cerrado permanente ni temporalmente.
 
         Retorna
         -------
         dict | None
             Lead válido, o None si el lugar no cumple los criterios.
         """
-        details = self._get_place_details(place_id)
-        if not details:
-            return None
-
         # ── Filtro 1: solo negocios operativos ──
-        status = details.get("business_status", "OPERATIONAL")
-        if status != "OPERATIONAL":
+        if item.get("permanentlyClosed") or item.get("temporarilyClosed"):
             return None
 
         # ── Filtro 2: excluir negocios que SÍ tienen sitio web ──
-        if details.get("website"):
+        if item.get("website"):
             return None
 
         # ── Extracción de datos requeridos ──
-        name = details.get("name", "").strip()
-        maps_url = details.get("url", "")
-
-        # Prefiere el número internacional; si no, usa el formateado localmente
-        raw_phone = details.get("international_phone_number") or \
-                    details.get("formatted_phone_number") or ""
+        name = (item.get("title") or "").strip()
+        maps_url = item.get("url") or ""
+        raw_phone = item.get("phone") or ""
+        place_id = item.get("placeId") or ""
 
         phone = self._format_phone_for_whatsapp(raw_phone)
 
@@ -437,7 +403,7 @@ class LeadScraper:
             Lista de leads. Cada lead tiene: name, phone, maps_url, place_id.
         """
         leads: list[dict] = []
-        seen_place_ids: set[str] = set()  # Evita duplicados
+        seen_ids: set[str] = set()  # Evita duplicados
 
         queries = self._build_search_queries(niche, location)
         logger.info(
@@ -449,55 +415,47 @@ class LeadScraper:
         # Barra de progreso: muestra cuántos leads se han encontrado
         pbar = tqdm(total=count, desc="Leads encontrados", unit="lead")
 
-        for query in queries:
+        # Envía las consultas en lotes para no sobrecargar una sola ejecución Apify
+        for batch_start in range(0, len(queries), APIFY_BATCH_SIZE):
             if len(leads) >= count:
                 break
 
-            logger.debug(f"Buscando: {query}")
-            page_token = None
+            batch = queries[batch_start: batch_start + APIFY_BATCH_SIZE]
+            logger.debug(
+                f"Ejecutando búsqueda Apify con {len(batch)} consultas "
+                f"(lote {batch_start // APIFY_BATCH_SIZE + 1})..."
+            )
 
-            # Itera sobre las páginas de resultados de esta consulta
-            while len(leads) < count:
-                try:
-                    response = self._text_search_page(query, page_token)
-                except Exception as exc:
-                    logger.error(f"Error en búsqueda '{query}': {exc}")
+            try:
+                items = self._search_places(batch)
+            except Exception as exc:
+                logger.error(f"Error en lote de búsqueda Apify: {exc}")
+                continue
+
+            for item in items:
+                if len(leads) >= count:
                     break
 
-                results = response.get("results", [])
-                if not results:
-                    break
+                # Usa placeId o URL como clave única para evitar duplicados
+                uid = item.get("placeId") or item.get("url") or ""
+                if not uid or uid in seen_ids:
+                    continue
+                seen_ids.add(uid)
 
-                for place in results:
-                    if len(leads) >= count:
-                        break
+                lead = self._extract_lead(item)
+                if lead is None:
+                    continue
 
-                    place_id = place.get("place_id")
-                    if not place_id or place_id in seen_place_ids:
-                        continue
-                    seen_place_ids.add(place_id)
+                # Validación adicional con IA (si está activa)
+                if self.use_ai and not self._ai_validate_lead(lead, niche=niche):
+                    logger.debug(f"IA descartó: {lead['name']}")
+                    continue
 
-                    time.sleep(REQUEST_DELAY)
-
-                    lead = self._extract_lead(place_id)
-                    if lead is None:
-                        continue
-
-                    # Validación adicional con IA (si está activa)
-                    if self.use_ai and not self._ai_validate_lead(lead, niche=niche):
-                        logger.debug(f"IA descartó: {lead['name']}")
-                        continue
-
-                    leads.append(lead)
-                    pbar.update(1)
-                    logger.debug(
-                        f"Lead #{len(leads)}: {lead['name']} | {lead['phone']}"
-                    )
-
-                # Pasa a la siguiente página si existe
-                page_token = response.get("next_page_token")
-                if not page_token:
-                    break
+                leads.append(lead)
+                pbar.update(1)
+                logger.debug(
+                    f"Lead #{len(leads)}: {lead['name']} | {lead['phone']}"
+                )
 
         pbar.close()
 
@@ -565,7 +523,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "LeadScraper: busca negocios sin sitio web usando Google Places API.\n"
+            "LeadScraper: busca negocios sin sitio web usando la API de Apify.\n"
             "Guarda nombre, teléfono (WhatsApp) y ubicación (Google Maps)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -630,7 +588,7 @@ def main() -> None:
 
     Flujo de ejecución:
     1. Lee argumentos de CLI
-    2. Valida la clave de API de Google Maps
+    2. Valida el token de API de Apify
     3. Inicializa el scraper (con o sin IA)
     4. Ejecuta la búsqueda
     5. Guarda los resultados
@@ -640,13 +598,13 @@ def main() -> None:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # ── Validar clave de Google Maps ──
-    google_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
-    if not google_api_key:
+    # ── Validar token de Apify ──
+    apify_api_token = os.getenv("APIFY_API_TOKEN", "")
+    if not apify_api_token:
         logger.error(
-            "No se encontró GOOGLE_MAPS_API_KEY.\n"
+            "No se encontró APIFY_API_TOKEN.\n"
             "1. Copia .env.example a .env\n"
-            "2. Rellena tu clave de Google Maps Platform\n"
+            "2. Rellena tu token de Apify (https://console.apify.com/account/integrations)\n"
             "3. Vuelve a ejecutar el script"
         )
         sys.exit(1)
@@ -657,7 +615,7 @@ def main() -> None:
 
     # ── Inicializar scraper ──
     scraper = LeadScraper(
-        api_key=google_api_key,
+        api_token=apify_api_token,
         use_ai=args.use_ai,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),

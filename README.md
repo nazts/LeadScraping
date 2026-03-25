@@ -1,6 +1,6 @@
 # 🦷 LeadScraping
 
-Script de Python que busca negocios de un nicho específico (por defecto: **clínicas dentales**) en una región (por defecto: **Europa**) que **no tengan sitio web**, usando la [Google Places API](https://developers.google.com/maps/documentation/places/web-service/overview).
+Script de Python que busca negocios de un nicho específico (por defecto: **clínicas dentales**) en una región (por defecto: **Europa**) que **no tengan sitio web**, usando la [API de Apify](https://apify.com/) (actor [`compass/crawler-google-places`](https://apify.com/compass/crawler-google-places)).
 
 Por cada negocio recopila:
 - ✅ **Nombre** del negocio
@@ -29,7 +29,7 @@ Solo se guarda un negocio cuando los **tres datos están completos**. La búsque
 ## 🔧 Requisitos
 
 - Python **3.10** o superior
-- Cuenta en [Google Cloud Platform](https://console.cloud.google.com/) con la **Places API** activada
+- Cuenta en [Apify](https://apify.com/) con un **API Token** válido
 - *(Opcional)* Cuenta en [OpenAI](https://platform.openai.com/) para el modo IA
 
 ---
@@ -67,10 +67,10 @@ pip install -r requirements.txt
 
 | Librería | Versión | Uso |
 |---|---|---|
-| `googlemaps` | ≥ 4.10.0 | Cliente oficial de Google Maps Platform (Places API) |
+| `apify-client` | ≥ 2.5.0 | Cliente oficial de Apify (ejecuta el actor Google Maps scraper) |
 | `python-dotenv` | ≥ 1.0.0 | Carga variables de entorno desde el archivo `.env` |
 | `phonenumbers` | ≥ 8.13.0 | Valida y formatea números de teléfono internacionales (WhatsApp) |
-| `requests` | ≥ 2.31.0 | Peticiones HTTP (dependencia de googlemaps) |
+| `requests` | ≥ 2.31.0 | Peticiones HTTP |
 | `tqdm` | ≥ 4.66.0 | Barra de progreso en la terminal |
 | `openai` | ≥ 1.30.0 | *(Opcional)* Cliente de OpenAI para el modo IA |
 
@@ -78,17 +78,14 @@ pip install -r requirements.txt
 
 ## 🔑 Configuración de API Keys
 
-### Google Maps Platform (obligatorio)
+### Apify (obligatorio)
 
-1. Ve a [console.cloud.google.com](https://console.cloud.google.com/)
-2. Crea un nuevo proyecto (o usa uno existente)
-3. Ve a **APIs y servicios → Biblioteca**
-4. Busca y activa la **Places API**
-5. Ve a **APIs y servicios → Credenciales**
-6. Haz clic en **Crear credenciales → Clave de API**
-7. Copia la clave generada
+1. Ve a [apify.com](https://apify.com/) y crea una cuenta (hay plan gratuito)
+2. Accede a **Console → Settings → Integrations**
+3. En la sección **API tokens**, haz clic en **+ Add new token**
+4. Asigna un nombre (ej: "LeadScraping") y copia el token generado
 
-> 💡 **Precio**: Google ofrece **$200 USD de crédito gratuito al mes**, lo que cubre miles de búsquedas. La Places Text Search cuesta ~$0.032 por consulta y Place Details ~$0.017 por consulta. Para precios actualizados consulta la [página oficial de precios](https://mapsplatform.google.com/pricing/).
+> 💡 **Precio**: Apify ofrece un **plan gratuito** con créditos mensuales suficientes para miles de búsquedas. Cada ejecución del actor consume unidades de cómputo (CU). Para precios actualizados consulta la [página oficial de precios](https://apify.com/pricing).
 
 ### Configurar el archivo `.env`
 
@@ -103,7 +100,7 @@ nano .env   # o: code .env / vim .env
 Rellena tu archivo `.env`:
 
 ```dotenv
-GOOGLE_MAPS_API_KEY=AIzaSy...tu_clave_real_aqui...
+APIFY_API_TOKEN=apify_api_...tu_token_real_aqui...
 
 # Solo si usas --use-ai:
 OPENAI_API_KEY=sk-...tu_clave_openai_aqui...
@@ -186,8 +183,8 @@ Si el modo IA está activado pero la clave de OpenAI no es válida o se queda si
 ### CSV (por defecto)
 ```csv
 name,phone,maps_url,place_id
-"Clínica Dental López",+34612345678,"https://maps.google.com/?cid=...",ChIJ...
-"Cabinet Dentaire Dupont",+33612345678,"https://maps.google.com/?cid=...",ChIJ...
+"Clínica Dental López",+34612345678,"https://www.google.com/maps/place/...",ChIJ...
+"Cabinet Dentaire Dupont",+33612345678,"https://www.google.com/maps/place/...",ChIJ...
 ```
 
 ### JSON
@@ -196,7 +193,7 @@ name,phone,maps_url,place_id
   {
     "name": "Clínica Dental López",
     "phone": "+34612345678",
-    "maps_url": "https://maps.google.com/?cid=...",
+    "maps_url": "https://www.google.com/maps/place/...",
     "place_id": "ChIJ..."
   }
 ]
@@ -206,7 +203,7 @@ Los campos guardados son:
 - **`name`**: Nombre del negocio tal como aparece en Google Maps
 - **`phone`**: Número en formato E.164 (ej: `+34612345678`), directamente usable en WhatsApp
 - **`maps_url`**: Enlace directo al negocio en Google Maps
-- **`place_id`**: ID único de Google (útil para referencia o consultas futuras)
+- **`place_id`**: ID único de Google Maps (útil para referencia o consultas futuras)
 
 ---
 
@@ -219,9 +216,8 @@ lead_scraper.py
 │
 ├── LeadScraper (clase principal)
 │   ├── _build_search_queries()   → genera lista de búsquedas
-│   ├── _text_search_page()       → llama a Places Text Search API
-│   ├── _get_place_details()      → llama a Place Details API
-│   ├── _extract_lead()           → valida y extrae datos del lead
+│   ├── _search_places()          → llama al actor de Apify (Google Maps scraper)
+│   ├── _extract_lead()           → valida y extrae datos del ítem Apify
 │   ├── _format_phone_for_whatsapp() → normaliza número de teléfono
 │   ├── _ai_validate_lead()       → validación opcional con IA
 │   └── scrape()                  → método principal de búsqueda
@@ -235,22 +231,21 @@ lead_scraper.py
 
 1. **Generación de consultas**: El script genera múltiples variaciones de búsqueda (ej: "dentist Spain", "clínica dental France", "Zahnarzt Germany"…) para maximizar la cobertura.
 
-2. **Text Search API**: Para cada consulta, llama a `gmaps.places()` que devuelve hasta 20 resultados por página. Si hay más resultados, usa el `next_page_token` para obtener más páginas.
+2. **Apify Actor**: Las consultas se envían en lotes al actor `compass/crawler-google-places` en Apify. El actor scrapeea Google Maps y devuelve resultados enriquecidos (nombre, teléfono, web, URL de Maps, etc.) sin necesidad de llamadas adicionales.
 
-3. **Filtro sin sitio web**: Llama a `gmaps.place()` (Place Details) para cada resultado y revisa si tiene el campo `website`. Si lo tiene, el negocio se descarta.
+3. **Filtro sin sitio web**: Cada ítem del dataset de Apify se examina para descartar negocios que tengan el campo `website` relleno.
 
 4. **Validación de datos**: Solo se acepta un lead si tiene los tres campos obligatorios: **nombre**, **teléfono válido** y **URL de Google Maps**.
 
 5. **Formato WhatsApp**: El número de teléfono se convierte al formato E.164 internacional usando la librería `phonenumbers`.
 
-6. **Control de duplicados**: Se mantiene un conjunto de `place_id` ya procesados para evitar guardar el mismo negocio dos veces.
+6. **Control de duplicados**: Se mantiene un conjunto de IDs ya procesados para evitar guardar el mismo negocio dos veces.
 
 7. **Exactitud del conteo**: La búsqueda se detiene en cuanto se alcanzan exactamente `count` leads válidos.
 
 ### Cosas a tener en cuenta
 
-- **Paginación**: La API devuelve máximo 60 resultados por consulta (3 páginas de 20). Para obtener más de 60 leads por zona, el script usa múltiples consultas con variaciones del nicho y diferentes subregiones.
-- **Rate limiting**: El script espera 0.5 segundos entre cada llamada a Place Details y 2 segundos antes de usar un `page_token` (requisito de Google).
+- **Lotes de consultas**: Las consultas se envían en lotes de 10 al actor de Apify. Cada ejecución devuelve hasta 20 resultados por consulta (configurable con `MAX_PLACES_PER_QUERY`).
 - **Negocios sin teléfono**: Muchos negocios en Google Maps no tienen teléfono registrado; estos se descartan automáticamente. Esto es especialmente común en zonas rurales.
 - **Cobertura europea**: Por defecto, la búsqueda cubre 20+ países europeos. Si se necesita mayor cobertura de un país específico, usa `--location "Germany"` directamente.
 
@@ -258,28 +253,29 @@ lead_scraper.py
 
 ## 💰 Costos de la API
 
-Google Maps Platform ofrece **$200 USD de crédito gratuito mensual**. Los precios aproximados son los siguientes (verifica los precios actuales en la [página oficial](https://mapsplatform.google.com/pricing/)):
+Apify ofrece un **plan gratuito** con créditos mensuales de cómputo (CU). Los precios aproximados son (verifica los precios actuales en la [página oficial](https://apify.com/pricing)):
 
-| Operación | Costo por llamada | Leads procesados con $200 |
+| Plan | Créditos (CU/mes) | Uso orientativo |
 |---|---|---|
-| Places Text Search | $0.032 | ~6,250 búsquedas |
-| Place Details (Basic) | $0.017 | ~11,764 detalles |
+| Free | 5 CU | ~500–1.000 lugares scrapeados |
+| Starter ($49/mes) | 75 CU | ~7.500–15.000 lugares |
+| Scale ($499/mes) | 1.000 CU | ~100.000+ lugares |
 
-Para obtener 100 leads válidos, el script puede procesar 300-500 candidatos (porque muchos tienen website o les faltan datos). Esto cuesta aproximadamente **$5-$10 USD**, bien dentro del crédito gratuito.
+Cada ejecución del actor `compass/crawler-google-places` consume aproximadamente **0.005–0.01 CU por lugar** scrapeado. Para obtener 100 leads válidos, el script puede procesar 300–500 candidatos, lo que supone aproximadamente **1.5–5 CU**, bien dentro del plan gratuito.
 
 ---
 
 ## 🐛 Solución de problemas
 
-### "No se encontró GOOGLE_MAPS_API_KEY"
+### "No se encontró APIFY_API_TOKEN"
 ```bash
-# Verifica que el archivo .env existe y tiene la clave
+# Verifica que el archivo .env existe y tiene el token
 cat .env
 ```
 
-### "REQUEST_DENIED" o "This API project is not authorized"
-- Verifica que la **Places API** está activada en tu proyecto de Google Cloud
-- Revisa que la clave no tenga restricciones de IP que bloqueen tu máquina
+### "Unauthorized" o "Authentication failed"
+- Verifica que el token es correcto en [console.apify.com/account/integrations](https://console.apify.com/account/integrations)
+- Asegúrate de que el token tiene permisos de ejecución de actores
 
 ### Pocos resultados encontrados
 - Amplía la búsqueda: `--location "Western Europe"` o añade más países
