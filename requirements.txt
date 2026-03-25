@@ -1,7 +1,8 @@
 # Core dependencies
+googlemaps>=4.10.0        # Official Google Maps Python client (wraps Places API)
 python-dotenv>=1.0.0      # Loads environment variables from .env file
 phonenumbers>=8.13.0      # Phone number parsing and formatting (international/WhatsApp format)
-requests>=2.31.0          # HTTP requests (Nominatim geocoding + Overpass API)
+requests>=2.31.0          # HTTP requests (used for additional data fetching)
 tqdm>=4.66.0              # Progress bar in terminal
 
 # Optional: AI-powered search enhancement
