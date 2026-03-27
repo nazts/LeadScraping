@@ -3,7 +3,7 @@
 lead_scraper.py
 ===============
 Script para buscar clientes potenciales (leads) de un nicho específico
-que NO tengan sitio web, usando la API de Apify (actor: compass/crawler-google-places).
+usando la API de Apify (actor: compass/crawler-google-places).
 
 Datos recopilados por cada negocio:
   - Nombre del negocio
@@ -12,6 +12,12 @@ Datos recopilados por cada negocio:
 
 Uso básico:
   python lead_scraper.py --count 100 --niche "Dental clinic" --location "Europe"
+
+Solo negocios CON sitio web:
+  python lead_scraper.py --count 100 --website-filter include
+
+Indiferente al sitio web:
+  python lead_scraper.py --count 100 --website-filter any
 
 Con modo IA:
   python lead_scraper.py --count 100 --niche "Dental clinic" --location "Europe" --use-ai
@@ -77,6 +83,9 @@ APIFY_BATCH_SIZE = 10
 # Número máximo de reintentos si la API devuelve un error transitorio
 MAX_RETRIES = 3
 
+# Valores válidos para el parámetro website_filter
+WEBSITE_FILTER_CHOICES = ("exclude", "include", "any")
+
 
 # ─────────────────────────────────────────────────────────────────
 # Clase principal
@@ -84,8 +93,8 @@ MAX_RETRIES = 3
 
 class LeadScraper:
     """
-    Busca negocios de un nicho específico que NO tengan sitio web
-    usando la API de Apify (actor: compass/crawler-google-places).
+    Busca negocios de un nicho específico usando la API de Apify
+    (actor: compass/crawler-google-places).
 
     Parámetros
     ----------
@@ -97,6 +106,11 @@ class LeadScraper:
         Clave de OpenAI (requerida si use_ai=True).
     openai_model : str
         Modelo de OpenAI a usar (por defecto: gpt-4o-mini).
+    website_filter : str
+        Controla el filtro de sitio web:
+        - ``"exclude"`` (por defecto): solo negocios SIN sitio web.
+        - ``"include"``: solo negocios CON sitio web.
+        - ``"any"``: indiferente al sitio web (incluye todos).
     """
 
     def __init__(
@@ -105,9 +119,18 @@ class LeadScraper:
         use_ai: bool = False,
         openai_api_key: Optional[str] = None,
         openai_model: str = "gpt-4o-mini",
+        website_filter: str = "exclude",
     ):
         # Inicializa el cliente oficial de Apify
         self._apify = ApifyClient(api_token)
+
+        # Configura el filtro de sitio web
+        if website_filter not in WEBSITE_FILTER_CHOICES:
+            raise ValueError(
+                f"website_filter debe ser 'exclude', 'include' o 'any', "
+                f"se recibió: '{website_filter}'"
+            )
+        self.website_filter = website_filter
 
         # Configura el modo IA
         self.use_ai = use_ai
@@ -300,7 +323,10 @@ class LeadScraper:
         Extrae los datos de un ítem devuelto por Apify y los valida.
 
         Regla de negocio:
-        - El negocio NO debe tener sitio web.
+        - El filtro de sitio web se aplica según ``self.website_filter``:
+            - ``"exclude"``: descarta negocios que tengan sitio web.
+            - ``"include"``: descarta negocios que NO tengan sitio web.
+            - ``"any"``: acepta independientemente del sitio web.
         - Debe tener nombre, teléfono válido y URL de Google Maps.
         - El negocio no debe estar cerrado permanente ni temporalmente.
 
@@ -313,9 +339,12 @@ class LeadScraper:
         if item.get("permanentlyClosed") or item.get("temporarilyClosed"):
             return None
 
-        # ── Filtro 2: excluir negocios que SÍ tienen sitio web ──
-        if item.get("website"):
+        # ── Filtro 2: filtro de sitio web configurable ──
+        if self.website_filter == "exclude" and item.get("website"):
             return None
+        if self.website_filter == "include" and not item.get("website"):
+            return None
+        # "any": no se aplica ningún filtro de sitio web
 
         # ── Extracción de datos requeridos ──
         name = (item.get("title") or "").strip()
@@ -386,7 +415,8 @@ class LeadScraper:
     ) -> list[dict]:
         """
         Busca exactamente `count` leads del nicho indicado en la ubicación
-        indicada, todos sin sitio web y con datos completos.
+        indicada, aplicando el filtro de sitio web configurado y con datos
+        completos.
 
         Parámetros
         ----------
@@ -409,6 +439,7 @@ class LeadScraper:
         logger.info(
             f"Iniciando búsqueda de {count} leads | "
             f"Nicho: {niche} | Ubicación: {location} | "
+            f"Filtro web: {self.website_filter} | "
             f"Modo IA: {'SÍ' if self.use_ai else 'NO'}"
         )
 
@@ -523,7 +554,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "LeadScraper: busca negocios sin sitio web usando la API de Apify.\n"
+            "LeadScraper: busca negocios usando la API de Apify.\n"
             "Guarda nombre, teléfono (WhatsApp) y ubicación (Google Maps)."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -531,6 +562,8 @@ def parse_args() -> argparse.Namespace:
             "Ejemplos:\n"
             "  python lead_scraper.py --count 50\n"
             "  python lead_scraper.py --count 100 --niche 'dentist' --location 'Germany'\n"
+            "  python lead_scraper.py --count 50 --website-filter include\n"
+            "  python lead_scraper.py --count 50 --website-filter any\n"
             "  python lead_scraper.py --count 200 --use-ai --output results.json\n"
         ),
     )
@@ -566,6 +599,18 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Activa el modo IA (OpenAI) para mejorar búsquedas y validar datos. "
             "Requiere OPENAI_API_KEY en .env. Si la clave falla, continúa sin IA."
+        ),
+    )
+    parser.add_argument(
+        "--website-filter",
+        type=str,
+        default="exclude",
+        choices=list(WEBSITE_FILTER_CHOICES),
+        help=(
+            "Filtro de sitio web: "
+            "'exclude' = solo negocios SIN web (default), "
+            "'include' = solo negocios CON web, "
+            "'any' = indiferente al web."
         ),
     )
     parser.add_argument(
@@ -619,6 +664,7 @@ def main() -> None:
         use_ai=args.use_ai,
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        website_filter=args.website_filter,
     )
 
     # ── Ejecutar búsqueda ──

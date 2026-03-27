@@ -1,6 +1,8 @@
 # 🦷 LeadScraping
 
-Script de Python que busca negocios de un nicho específico (por defecto: **clínicas dentales**) en una región (por defecto: **Europa**) que **no tengan sitio web**, usando la [API de Apify](https://apify.com/) (actor [`compass/crawler-google-places`](https://apify.com/compass/crawler-google-places)).
+Script de Python que busca negocios de un nicho específico (por defecto: **clínicas dentales**) en una región (por defecto: **Europa**), usando la [API de Apify](https://apify.com/) (actor [`compass/crawler-google-places`](https://apify.com/compass/crawler-google-places)).
+
+Por defecto busca negocios **sin sitio web**, aunque esto es configurable con `--website-filter`.
 
 Por cada negocio recopila:
 - ✅ **Nombre** del negocio
@@ -114,7 +116,7 @@ OPENAI_MODEL=gpt-4o-mini
 ## 🚀 Uso básico
 
 ```bash
-# Buscar 50 clínicas dentales en Europa (configuración por defecto)
+# Buscar 50 clínicas dentales en Europa sin sitio web (configuración por defecto)
 python lead_scraper.py
 
 # Buscar exactamente 100 leads
@@ -122,6 +124,12 @@ python lead_scraper.py --count 100
 
 # Cambiar nicho y ubicación
 python lead_scraper.py --count 50 --niche "veterinary clinic" --location "Germany"
+
+# Solo negocios CON sitio web
+python lead_scraper.py --count 50 --website-filter include
+
+# Indiferente al sitio web (todos)
+python lead_scraper.py --count 50 --website-filter any
 
 # Guardar en JSON en lugar de CSV
 python lead_scraper.py --count 100 --output results.json
@@ -140,6 +148,7 @@ python lead_scraper.py --help
 | `--niche` | — | `"Dental clinic"` | Tipo de negocio a buscar |
 | `--location` | — | `"Europe"` | País, ciudad o región |
 | `--output` | `-o` | `leads.csv` | Archivo de salida (`.csv` o `.json`) |
+| `--website-filter` | — | `exclude` | Filtro de sitio web: `exclude` (sin web), `include` (con web), `any` (todos) |
 | `--use-ai` | — | desactivado | Activa el modo IA con OpenAI |
 | `--verbose` | `-v` | desactivado | Muestra logs de depuración |
 
@@ -154,6 +163,12 @@ python lead_scraper.py --count 75 --niche "dentiste" --location "France" --use-a
 
 # Buscar en una ciudad específica
 python lead_scraper.py --count 30 --niche "dental" --location "Warsaw, Poland"
+
+# Solo negocios CON sitio web (para campañas de rediseño web)
+python lead_scraper.py --count 50 --website-filter include
+
+# Indiferente al sitio web (todos los negocios del nicho)
+python lead_scraper.py --count 50 --website-filter any
 ```
 
 ---
@@ -233,7 +248,10 @@ lead_scraper.py
 
 2. **Apify Actor**: Las consultas se envían en lotes al actor `compass/crawler-google-places` en Apify. El actor scrapeea Google Maps y devuelve resultados enriquecidos (nombre, teléfono, web, URL de Maps, etc.) sin necesidad de llamadas adicionales.
 
-3. **Filtro sin sitio web**: Cada ítem del dataset de Apify se examina para descartar negocios que tengan el campo `website` relleno.
+3. **Filtro de sitio web**: Cada ítem del dataset de Apify se examina según el parámetro `--website-filter`:
+   - `exclude` (por defecto): descarta negocios que tengan el campo `website` relleno.
+   - `include`: descarta negocios que NO tengan sitio web.
+   - `any`: acepta todos los negocios independientemente del sitio web.
 
 4. **Validación de datos**: Solo se acepta un lead si tiene los tres campos obligatorios: **nombre**, **teléfono válido** y **URL de Google Maps**.
 
