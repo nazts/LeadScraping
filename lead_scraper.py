@@ -86,6 +86,141 @@ MAX_RETRIES = 3
 # Valores válidos para el parámetro website_filter
 WEBSITE_FILTER_CHOICES = ("exclude", "include", "any")
 
+# Provincias/ciudades principales por país para diversificar la búsqueda
+# cuando se especifica un país concreto (en lugar de una región amplia).
+COUNTRY_SUBREGIONS: dict[str, list[str]] = {
+    "spain": [
+        "Madrid", "Barcelona", "Valencia", "Seville", "Zaragoza",
+        "Málaga", "Murcia", "Palma", "Las Palmas", "Bilbao",
+        "Alicante", "Córdoba", "Valladolid", "Vigo", "Gijón",
+    ],
+    "france": [
+        "Paris", "Marseille", "Lyon", "Toulouse", "Nice",
+        "Nantes", "Strasbourg", "Montpellier", "Bordeaux", "Lille",
+        "Rennes", "Reims", "Le Havre", "Saint-Étienne", "Toulon",
+    ],
+    "germany": [
+        "Berlin", "Hamburg", "Munich", "Cologne", "Frankfurt",
+        "Stuttgart", "Düsseldorf", "Dortmund", "Essen", "Leipzig",
+        "Bremen", "Dresden", "Hanover", "Nuremberg", "Duisburg",
+    ],
+    "italy": [
+        "Rome", "Milan", "Naples", "Turin", "Palermo",
+        "Genoa", "Bologna", "Florence", "Bari", "Catania",
+        "Venice", "Verona", "Messina", "Padua", "Trieste",
+    ],
+    "poland": [
+        "Warsaw", "Kraków", "Łódź", "Wrocław", "Poznań",
+        "Gdańsk", "Szczecin", "Bydgoszcz", "Lublin", "Białystok",
+        "Katowice", "Gdynia", "Częstochowa", "Radom", "Sosnowiec",
+    ],
+    "united kingdom": [
+        "London", "Birmingham", "Manchester", "Leeds", "Glasgow",
+        "Sheffield", "Bradford", "Edinburgh", "Liverpool", "Bristol",
+        "Cardiff", "Leicester", "Coventry", "Nottingham", "Newcastle",
+    ],
+    "mexico": [
+        "Ciudad de México", "Guadalajara", "Monterrey", "Puebla", "Tijuana",
+        "León", "Juárez", "Torreón", "Querétaro", "San Luis Potosí",
+        "Mérida", "Mexicali", "Aguascalientes", "Cuernavaca", "Acapulco",
+    ],
+    "argentina": [
+        "Buenos Aires", "Córdoba", "Rosario", "Mendoza", "La Plata",
+        "San Miguel de Tucumán", "Mar del Plata", "Salta", "Santa Fe", "San Juan",
+        "Resistencia", "Santiago del Estero", "Corrientes", "Neuquén", "Posadas",
+    ],
+    "colombia": [
+        "Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena",
+        "Cúcuta", "Soledad", "Ibagué", "Bucaramanga", "Soacha",
+        "Santa Marta", "Villavicencio", "Bello", "Pereira", "Manizales",
+    ],
+    "peru": [
+        "Lima", "Arequipa", "Trujillo", "Chiclayo", "Piura",
+        "Iquitos", "Cusco", "Huancayo", "Tacna", "Juliaca",
+        "Ica", "Pucallpa", "Chimbote", "Sullana", "Ayacucho",
+    ],
+    "chile": [
+        "Santiago", "Valparaíso", "Concepción", "La Serena", "Antofagasta",
+        "Temuco", "Rancagua", "Talca", "Arica", "Chillán",
+        "Iquique", "Puerto Montt", "Coquimbo", "Osorno", "Valdivia",
+    ],
+    "brazil": [
+        "São Paulo", "Rio de Janeiro", "Salvador", "Fortaleza", "Belo Horizonte",
+        "Manaus", "Curitiba", "Recife", "Porto Alegre", "Belém",
+        "Goiânia", "Guarulhos", "Campinas", "São Luís", "Maceió",
+    ],
+    "portugal": [
+        "Lisboa", "Porto", "Braga", "Amadora", "Setúbal",
+        "Coimbra", "Funchal", "Almada", "Aveiro", "Viseu",
+        "Guimarães", "Cascais", "Faro", "Évora", "Leiria",
+    ],
+    "romania": [
+        "București", "Cluj-Napoca", "Timișoara", "Iași", "Constanța",
+        "Craiova", "Brașov", "Galați", "Ploiești", "Oradea",
+        "Brăila", "Bacău", "Arad", "Pitești", "Sibiu",
+    ],
+    "netherlands": [
+        "Amsterdam", "Rotterdam", "The Hague", "Utrecht", "Eindhoven",
+        "Tilburg", "Groningen", "Almere", "Breda", "Nijmegen",
+        "Enschede", "Apeldoorn", "Haarlem", "Arnhem", "Zaanstad",
+    ],
+    "belgium": [
+        "Brussels", "Antwerp", "Ghent", "Charleroi", "Liège",
+        "Bruges", "Namur", "Leuven", "Mons", "Aalst",
+        "Mechelen", "La Louvière", "Kortrijk", "Hasselt", "Ostend",
+    ],
+    "greece": [
+        "Athens", "Thessaloniki", "Patras", "Heraklion", "Larissa",
+        "Volos", "Rhodes", "Ioannina", "Chania", "Chalcis",
+        "Agrinio", "Kalamata", "Piraeus", "Kavala", "Serres",
+    ],
+    "sweden": [
+        "Stockholm", "Gothenburg", "Malmö", "Uppsala", "Västerås",
+        "Örebro", "Linköping", "Helsingborg", "Jönköping", "Norrköping",
+        "Lund", "Umeå", "Gävle", "Borås", "Södertälje",
+    ],
+    "austria": [
+        "Vienna", "Graz", "Linz", "Salzburg", "Innsbruck",
+        "Klagenfurt", "Villach", "Wels", "Sankt Pölten", "Dornbirn",
+    ],
+    "switzerland": [
+        "Zürich", "Geneva", "Basel", "Bern", "Lausanne",
+        "Winterthur", "Lucerne", "St. Gallen", "Lugano", "Biel",
+    ],
+    "czech republic": [
+        "Prague", "Brno", "Ostrava", "Plzeň", "Liberec",
+        "Olomouc", "České Budějovice", "Hradec Králové", "Ústí nad Labem", "Pardubice",
+    ],
+    "hungary": [
+        "Budapest", "Debrecen", "Miskolc", "Szeged", "Pécs",
+        "Győr", "Nyíregyháza", "Kecskemét", "Székesfehérvár", "Szombathely",
+    ],
+    "denmark": [
+        "Copenhagen", "Aarhus", "Odense", "Aalborg", "Frederiksberg",
+        "Esbjerg", "Gentofte", "Gladsaxe", "Randers", "Kolding",
+    ],
+    "finland": [
+        "Helsinki", "Espoo", "Tampere", "Vantaa", "Oulu",
+        "Turku", "Jyväskylä", "Lahti", "Kuopio", "Kouvola",
+    ],
+    "norway": [
+        "Oslo", "Bergen", "Trondheim", "Stavanger", "Bærum",
+        "Kristiansand", "Fredrikstad", "Sandnes", "Tromsø", "Drammen",
+    ],
+    "slovakia": [
+        "Bratislava", "Košice", "Prešov", "Nitra", "Žilina",
+        "Banská Bystrica", "Trnava", "Martin", "Trenčín", "Poprad",
+    ],
+    "croatia": [
+        "Zagreb", "Split", "Rijeka", "Osijek", "Zadar",
+        "Slavonski Brod", "Pula", "Sesvete", "Karlovac", "Varaždin",
+    ],
+    "bulgaria": [
+        "Sofia", "Plovdiv", "Varna", "Burgas", "Ruse",
+        "Stara Zagora", "Pleven", "Sliven", "Dobrich", "Shumen",
+    ],
+}
+
 
 # ─────────────────────────────────────────────────────────────────
 # Clase principal
@@ -111,6 +246,10 @@ class LeadScraper:
         - ``"exclude"`` (por defecto): solo negocios SIN sitio web.
         - ``"include"``: solo negocios CON sitio web.
         - ``"any"``: indiferente al sitio web (incluye todos).
+    language : str
+        Código de idioma para la búsqueda en Google Maps (ej: ``"es"``, ``"en"``,
+        ``"fr"``). Por defecto ``"es"`` (español). Afecta los nombres y reseñas
+        devueltos por Apify.
     """
 
     def __init__(
@@ -120,6 +259,7 @@ class LeadScraper:
         openai_api_key: Optional[str] = None,
         openai_model: str = "gpt-4o-mini",
         website_filter: str = "exclude",
+        language: str = "es",
     ):
         # Inicializa el cliente oficial de Apify
         self._apify = ApifyClient(api_token)
@@ -131,6 +271,9 @@ class LeadScraper:
                 f"se recibió: '{website_filter}'"
             )
         self.website_filter = website_filter
+
+        # Idioma para la búsqueda en Google Maps (código ISO 639-1)
+        self.language = language
 
         # Configura el modo IA
         self.use_ai = use_ai
@@ -218,7 +361,23 @@ class LeadScraper:
                 "Norway", "Slovakia", "Croatia", "Bulgaria",
             ]
         else:
-            subregions = [location]
+            # Si el país está en el diccionario de subregiones y la ubicación
+            # es un país (sin coma), usamos sus ciudades/provincias para
+            # maximizar la cobertura geográfica dentro del país.
+            # Si ya viene con coma (ej: "Madrid, Spain") es una ciudad concreta
+            # y no se expande.
+            location_lower = location.lower().strip()
+            subregions = None
+            if "," not in location:
+                for key, cities in COUNTRY_SUBREGIONS.items():
+                    # Coincidencia flexible: el nombre del país está contenido en
+                    # la ubicación o viceversa (cubre exacta y parcial,
+                    # ej: "Spain" coincide con clave "spain")
+                    if key in location_lower or location_lower in key:
+                        subregions = [f"{city}, {location}" for city in cities]
+                        break
+            if subregions is None:
+                subregions = [location]
 
         queries: list[str] = []
         for variant in niche_variants:
@@ -237,8 +396,9 @@ class LeadScraper:
             f"probablemente NO tengan sitio web (pequeños negocios locales, "
             f"clínicas independientes, etc.).\n"
             f"Devuelve SOLO la lista en formato JSON: [\"consulta1\", \"consulta2\", ...]\n"
-            f"Usa variaciones de idioma (inglés, español, francés, alemán, italiano, etc.) "
-            f"y diferentes ciudades/regiones de {location}."
+            f"Usa el idioma '{self.language}' como idioma principal, añade variaciones "
+            f"en otros idiomas si es útil para la región, "
+            f"y usa diferentes ciudades/provincias de {location} para maximizar la cobertura."
         )
         try:
             response = self.ai_client.chat.completions.create(
@@ -281,7 +441,7 @@ class LeadScraper:
                     run_input={
                         "searchStringsArray": queries,
                         "maxCrawledPlacesPerSearch": MAX_PLACES_PER_QUERY,
-                        "language": "en",
+                        "language": self.language,
                         "includeHistogram": False,
                         "includeOpeningHours": False,
                         "includePeopleAlsoBrowse": False,
@@ -439,6 +599,7 @@ class LeadScraper:
         logger.info(
             f"Iniciando búsqueda de {count} leads | "
             f"Nicho: {niche} | Ubicación: {location} | "
+            f"Idioma: {self.language} | "
             f"Filtro web: {self.website_filter} | "
             f"Modo IA: {'SÍ' if self.use_ai else 'NO'}"
         )
@@ -602,6 +763,15 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--language",
+        type=str,
+        default="es",
+        help=(
+            "Código de idioma para la búsqueda en Google Maps (default: 'es'). "
+            "Ejemplos: 'es' (español), 'en' (inglés), 'fr' (francés), 'de' (alemán)."
+        ),
+    )
+    parser.add_argument(
         "--website-filter",
         type=str,
         default="exclude",
@@ -665,6 +835,7 @@ def main() -> None:
         openai_api_key=os.getenv("OPENAI_API_KEY"),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         website_filter=args.website_filter,
+        language=args.language,
     )
 
     # ── Ejecutar búsqueda ──
