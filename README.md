@@ -147,6 +147,7 @@ python lead_scraper.py --help
 | `--count` | `-n` | `50` | Número exacto de leads a buscar |
 | `--niche` | — | `"Dental clinic"` | Tipo de negocio a buscar |
 | `--location` | — | `"Europe"` | País, ciudad o región |
+| `--language` | — | `es` | Código de idioma para la búsqueda (`es`, `en`, `fr`, `de`, …) |
 | `--output` | `-o` | `leads.csv` | Archivo de salida (`.csv` o `.json`) |
 | `--website-filter` | — | `exclude` | Filtro de sitio web: `exclude` (sin web), `include` (con web), `any` (todos) |
 | `--use-ai` | — | desactivado | Activa el modo IA con OpenAI |
@@ -169,6 +170,15 @@ python lead_scraper.py --count 50 --website-filter include
 
 # Indiferente al sitio web (todos los negocios del nicho)
 python lead_scraper.py --count 50 --website-filter any
+
+# Buscar en español (por defecto) en México, recorriendo ciudades automáticamente
+python lead_scraper.py --count 100 --location "Mexico" --language es
+
+# Buscar en inglés en Alemania
+python lead_scraper.py --count 50 --niche "dental" --location "Germany" --language en
+
+# Buscar en francés en Francia
+python lead_scraper.py --count 50 --niche "dentiste" --location "France" --language fr
 ```
 
 ---
@@ -246,26 +256,29 @@ lead_scraper.py
 
 1. **Generación de consultas**: El script genera múltiples variaciones de búsqueda (ej: "dentist Spain", "clínica dental France", "Zahnarzt Germany"…) para maximizar la cobertura.
 
-2. **Apify Actor**: Las consultas se envían en lotes al actor `compass/crawler-google-places` en Apify. El actor scrapeea Google Maps y devuelve resultados enriquecidos (nombre, teléfono, web, URL de Maps, etc.) sin necesidad de llamadas adicionales.
+2. **Expansión por ciudades/provincias**: Si se especifica un país concreto (ej: `"Spain"`, `"Mexico"`), el script divide automáticamente la búsqueda en las principales ciudades y provincias de ese país para obtener mayor cobertura geográfica. Para `"Europe"` se divide en países.
 
-3. **Filtro de sitio web**: Cada ítem del dataset de Apify se examina según el parámetro `--website-filter`:
+3. **Apify Actor**: Las consultas se envían en lotes al actor `compass/crawler-google-places` en Apify. El actor scrapeea Google Maps y devuelve resultados enriquecidos (nombre, teléfono, web, URL de Maps, etc.) sin necesidad de llamadas adicionales.
+
+4. **Filtro de sitio web**: Cada ítem del dataset de Apify se examina según el parámetro `--website-filter`:
    - `exclude` (por defecto): descarta negocios que tengan el campo `website` relleno.
    - `include`: descarta negocios que NO tengan sitio web.
    - `any`: acepta todos los negocios independientemente del sitio web.
 
-4. **Validación de datos**: Solo se acepta un lead si tiene los tres campos obligatorios: **nombre**, **teléfono válido** y **URL de Google Maps**.
+5. **Validación de datos**: Solo se acepta un lead si tiene los tres campos obligatorios: **nombre**, **teléfono válido** y **URL de Google Maps**.
 
-5. **Formato WhatsApp**: El número de teléfono se convierte al formato E.164 internacional usando la librería `phonenumbers`.
+6. **Formato WhatsApp**: El número de teléfono se convierte al formato E.164 internacional usando la librería `phonenumbers`.
 
-6. **Control de duplicados**: Se mantiene un conjunto de IDs ya procesados para evitar guardar el mismo negocio dos veces.
+7. **Control de duplicados**: Se mantiene un conjunto de IDs ya procesados para evitar guardar el mismo negocio dos veces.
 
-7. **Exactitud del conteo**: La búsqueda se detiene en cuanto se alcanzan exactamente `count` leads válidos.
+8. **Exactitud del conteo**: La búsqueda se detiene en cuanto se alcanzan exactamente `count` leads válidos.
 
 ### Cosas a tener en cuenta
 
 - **Lotes de consultas**: Las consultas se envían en lotes de 10 al actor de Apify. Cada ejecución devuelve hasta 20 resultados por consulta (configurable con `MAX_PLACES_PER_QUERY`).
 - **Negocios sin teléfono**: Muchos negocios en Google Maps no tienen teléfono registrado; estos se descartan automáticamente. Esto es especialmente común en zonas rurales.
-- **Cobertura europea**: Por defecto, la búsqueda cubre 20+ países europeos. Si se necesita mayor cobertura de un país específico, usa `--location "Germany"` directamente.
+- **Cobertura por país**: Al especificar un país concreto (ej: `--location "Spain"`), la búsqueda se divide automáticamente en sus principales ciudades/provincias. Para Europa, se divide en 20+ países. Si se necesita una zona más específica, pásala directamente (ej: `--location "Andalucía, Spain"`).
+- **Idioma**: Por defecto el idioma es español (`--language es`). Cámbialo al idioma de la región para obtener nombres locales más precisos (ej: `--language de` para Alemania).
 
 ---
 
